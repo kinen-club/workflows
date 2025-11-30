@@ -43,6 +43,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Note: Issue/comment is ALREADY created by the worker before dispatching
+      # We just extract the data from client_payload - no need to create anything
+
       - name: Handle Session Start
         if: github.event.action == 'email_session_start'
         uses: actions/github-script@v7
@@ -50,29 +53,20 @@ jobs:
         with:
           script: |
             const payload = context.payload.client_payload || {};
-            const subject = payload.subject || 'New Kinen Session';
+            const issueNumber = payload.issue_number;
             const body = payload.body || '(No content)';
             const from = payload.from || 'unknown';
 
-            console.log('Email Session Start:');
-            console.log('  Subject:', subject);
+            console.log('Email Session Start (issue already created by worker):');
+            console.log('  Issue #:', issueNumber);
             console.log('  Body length:', body.length);
             console.log('  Body preview:', body.substring(0, 200));
             console.log('  From:', from);
 
-            const issue = await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: subject,
-              body: '**From:** ' + from + '\n\n---\n\n' + body,
-              labels: ['kinen-session']
-            });
-
-            console.log('Created issue #' + issue.data.number);
-            core.setOutput('issue_number', issue.data.number);
+            core.setOutput('issue_number', issueNumber);
             core.setOutput('user_email', from);
             core.setOutput('user_message', body);
-            return issue.data.number;
+            return issueNumber;
 
       - name: Handle Session Continue (Email)
         if: github.event.action == 'email_session_continue'
@@ -80,28 +74,21 @@ jobs:
         id: continue-session
         with:
           script: |
+            // Comment already created by worker - just extract data
             const payload = context.payload.client_payload || {};
-            const issue_number = payload.issue_number;
+            const issueNumber = payload.issue_number;
             const body = payload.body || '(No content)';
             const from = payload.from || 'unknown';
 
-            console.log('Email Session Continue:');
-            console.log('  Issue:', issue_number);
+            console.log('Email Session Continue (comment already added by worker):');
+            console.log('  Issue:', issueNumber);
             console.log('  Body length:', body.length);
             console.log('  Body preview:', body.substring(0, 200));
 
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: parseInt(issue_number),
-              body: '**From:** ' + from + '\n\n---\n\n' + body
-            });
-
-            console.log('Added comment to issue #' + issue_number);
-            core.setOutput('issue_number', issue_number);
+            core.setOutput('issue_number', issueNumber);
             core.setOutput('user_email', from);
             core.setOutput('user_message', body);
-            return issue_number;
+            return issueNumber;
 
       - name: Handle Issue Comment (GitHub UI)
         if: github.event_name == 'issue_comment'

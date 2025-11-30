@@ -1,0 +1,73 @@
+name: 'Finalize Session'
+description: 'Commits changes and posts summary'
+inputs:
+  issue_number:
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - name: Commit Changes
+      shell: bash
+      run: |
+        git config user.name "Kinen Bot"
+        git config user.email "bot@kinen.club"
+
+        if [ -n "$(git status --porcelain)" ]; then
+          git add .
+          git commit -m "chore: session update for issue #${{ inputs.issue_number }}"
+          git push -u origin "session/issue-${{ inputs.issue_number }}"
+        fi
+
+    - name: Get changes summary
+      id: summary
+      shell: bash
+      run: |
+        BRANCH="session/issue-${{ inputs.issue_number }}"
+        COMPARE_URL="https://github.com/${{ github.repository }}/compare/main...$BRANCH"
+        echo "url=$COMPARE_URL" >> $GITHUB_OUTPUT
+
+        FILES_CHANGED=$(git diff --name-only origin/main...HEAD 2>/dev/null | head -10 | tr '\n' ', ' || echo "none")
+        echo "files=$FILES_CHANGED" >> $GITHUB_OUTPUT
+
+        if [ -f /tmp/aider-output.log ]; then
+          {
+            echo "aider_output<<AIDEREOF"
+            tail -100 /tmp/aider-output.log
+            echo "AIDEREOF"
+          } >> $GITHUB_OUTPUT
+        fi
+
+    - name: Post AI Response
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const filesChanged = '${{ steps.summary.outputs.files }}' || 'No files changed';
+          const compareUrl = '${{ steps.summary.outputs.url }}';
+          const aiderOutput = `${{ steps.summary.outputs.aider_output }}` || 'No output captured';
+
+          const comment = [
+            '## 🤖 AI Session Update',
+            '',
+            'Session processing complete.',
+            '',
+            '### Changes',
+            '- Files: ' + filesChanged,
+            '- [View full diff](' + compareUrl + ')',
+            '',
+            '### Aider Output',
+            '```',
+            aiderOutput.substring(0, 3000),
+            aiderOutput.length > 3000 ? '\n... (truncated)' : '',
+            '```',
+            '',
+            '---',
+            '*Reply to this issue (or via email) to continue the conversation.*'
+          ].join('\n');
+
+          await github.rest.issues.createComment({
+            issue_number: ${{ inputs.issue_number }},
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment
+          });

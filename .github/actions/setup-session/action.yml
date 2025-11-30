@@ -1,0 +1,134 @@
+name: 'Setup Session'
+description: 'Prepares workspace, auth, and tools'
+inputs:
+  issue_number:
+    required: true
+  methodology_url:
+    required: true
+  model:
+    required: false
+  google_refresh_token:
+    required: false
+  openrouter_api_key:
+    required: false
+  anthropic_api_key:
+    required: false
+  gemini_api_key:
+    required: false
+  openai_api_key:
+    required: false
+
+outputs:
+  model:
+    value: ${{ steps.provider.outputs.model }}
+  methodology_file:
+    value: ${{ steps.methodology.outputs.methodology_file }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Create/Checkout Session Branch
+      shell: bash
+      run: |
+        BRANCH="session/issue-${{ inputs.issue_number }}"
+        git fetch origin || true
+
+        if git show-ref --verify --quiet refs/remotes/origin/$BRANCH; then
+          git checkout "$BRANCH"
+          git pull origin "$BRANCH"
+        else
+          git checkout -b "$BRANCH"
+        fi
+
+        mkdir -p sessions
+        echo "📁 Session directory ready"
+
+    - name: Fetch Methodology
+      id: methodology
+      shell: bash
+      run: |
+        echo "Fetching methodology from ${{ inputs.methodology_url }}..."
+        curl -sL "${{ inputs.methodology_url }}" > /tmp/base-methodology.md || echo "# Kinen AI Assistant" > /tmp/base-methodology.md
+        
+        if [ -f ".kinen/custom-instructions.md" ]; then
+          echo "" >> /tmp/base-methodology.md
+          echo "---" >> /tmp/base-methodology.md
+          echo "" >> /tmp/base-methodology.md
+          cat .kinen/custom-instructions.md >> /tmp/base-methodology.md
+        fi
+
+        echo "methodology_file=/tmp/base-methodology.md" >> $GITHUB_OUTPUT
+
+    - name: Setup Google OAuth
+      id: google-auth
+      shell: bash
+      env:
+        GOOGLE_REFRESH_TOKEN: ${{ inputs.google_refresh_token }}
+      run: |
+        if [ -z "$GOOGLE_REFRESH_TOKEN" ]; then
+          echo "auth_success=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        RESPONSE=$(curl -s -X POST https://kinen.club/api/token/google \
+          -H "Content-Type: application/json" \
+          -d "{\"refresh_token\": \"${GOOGLE_REFRESH_TOKEN}\"}")
+
+        ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token')
+
+        if [ "$ACCESS_TOKEN" == "null" ] || [ -z "$ACCESS_TOKEN" ]; then
+          echo "auth_success=false" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        mkdir -p ~/.gemini
+        cat > ~/.gemini/oauth-credentials.json << EOF
+        {
+          "access_token": "$ACCESS_TOKEN",
+          "refresh_token": "$GOOGLE_REFRESH_TOKEN",
+          "token_type": "Bearer",
+          "scope": "https://www.googleapis.com/auth/cloud-platform openid email profile"
+        }
+        EOF
+        chmod 600 ~/.gemini/oauth-credentials.json
+        echo "auth_success=true" >> $GITHUB_OUTPUT
+
+    - name: Determine AI Provider
+      id: provider
+      shell: bash
+      env:
+        INPUT_MODEL: ${{ inputs.model }}
+        HAS_GOOGLE_AUTH: ${{ steps.google-auth.outputs.auth_success == 'true' }}
+        HAS_OPENROUTER: ${{ inputs.openrouter_api_key != '' }}
+        HAS_ANTHROPIC: ${{ inputs.anthropic_api_key != '' }}
+        HAS_GEMINI: ${{ inputs.gemini_api_key != '' }}
+        HAS_OPENAI: ${{ inputs.openai_api_key != '' }}
+      run: |
+        if [ -n "$INPUT_MODEL" ]; then
+          echo "model=$INPUT_MODEL" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        if [ "$HAS_GOOGLE_AUTH" == "true" ]; then
+          echo "model=gemini/gemini-2.5-pro" >> $GITHUB_OUTPUT
+        elif [ "$HAS_OPENROUTER" == "true" ]; then
+          echo "model=openrouter/anthropic/claude-sonnet-4.5" >> $GITHUB_OUTPUT
+        elif [ "$HAS_ANTHROPIC" == "true" ]; then
+          echo "model=anthropic/claude-sonnet-4-20250514" >> $GITHUB_OUTPUT
+        elif [ "$HAS_GEMINI" == "true" ]; then
+          echo "model=gemini/gemini-2.5-pro" >> $GITHUB_OUTPUT
+        elif [ "$HAS_OPENAI" == "true" ]; then
+          echo "model=gpt-4o" >> $GITHUB_OUTPUT
+        else
+          echo "❌ No AI credentials found!"
+          exit 1
+        fi
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Aider
+      shell: bash
+      run: pip install -q aider-chat
