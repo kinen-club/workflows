@@ -1,34 +1,66 @@
-name: Kinen Onboard (Reusable)
+# Kinen Onboard Workflow (Reusable)
+# Called when user first pushes to their new space
+
+name: Kinen Onboard
 
 on:
   workflow_call:
     inputs:
-      relay_url:
-        description: 'Relay endpoint URL'
+      club_url:
+        description: 'Kinen Club endpoint URL'
         required: false
         type: string
-        default: 'https://relay.kinen.space'
-    secrets:
-      RELAY_TOKEN:
-        description: 'Optional auth token for relay'
-        required: false
+        default: 'https://kinen.club'
 
 jobs:
   setup:
     runs-on: ubuntu-latest
     steps:
-      - name: Get user email
-        id: get-email
+      - name: Welcome message
         run: |
-          EMAIL="${{ github.event.pusher.email }}"
-          echo "email=$EMAIL" >> $GITHUB_OUTPUT
+          echo "🎉 Welcome to Kinen!"
+          echo "Repository: ${{ github.repository }}"
+          echo "Owner: ${{ github.repository_owner }}"
+          
+      - name: Create welcome issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const body = [
+              '# Your Kinen Space is Ready!',
+              '',
+              'Your workspace has been set up successfully.',
+              '',
+              '## Quick Start',
+              '',
+              '1. **Install the GitHub App** (if not done): [Install Kinen](https://github.com/apps/kinen-club)',
+              '2. **Set up your API key** in Repository Settings → Secrets → Actions:',
+              '   - `OPENAI_API_KEY` or',
+              '   - `GEMINI_API_KEY` or',
+              '   - `ANTHROPIC_API_KEY`',
+              '3. **Start a session** by sending an email to: `your-project@' + owner + '.kinen.space`',
+              '',
+              '## How It Works',
+              '',
+              '1. You send an email describing what you want to build',
+              '2. AI creates an issue and asks clarifying questions',
+              '3. You reply by email',
+              '4. AI works on your code and updates the issue',
+              '5. Repeat until done!',
+              '',
+              '## Resources',
+              '',
+              '- [Kinen Club](https://kinen.club) - Platform home',
+              '- [Kinen Methodology](https://kinen.club/methodology.md) - How AI sessions work',
+              '',
+              'Happy building! 🚀'
+            ].join('\n');
 
-      - name: Notify Relay
-        run: |
-          curl -X POST ${{ inputs.relay_url }}/onboard \
-            -H "Content-Type: application/json" \
-            -d '{
-              "username": "${{ github.actor }}",
-              "repo": "${{ github.event.repository.name }}",
-              "email": "${{ steps.get-email.outputs.email }}"
-            }'
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '👋 Welcome to your Kinen Space!',
+              body: body,
+              labels: ['kinen-welcome']
+            });

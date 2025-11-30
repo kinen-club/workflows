@@ -1,28 +1,31 @@
-name: Kinen Agent (Reusable)
+# Kinen Agent Workflow (Reusable)
+# Runs AI sessions triggered by email
+
+name: Kinen Agent
 
 on:
   workflow_call:
     inputs:
-      kinen_url:
-        description: 'Kinen Club URL (for fetching methodology)'
+      methodology_url:
+        description: 'URL to fetch base methodology'
         required: false
         type: string
-        default: 'https://kinen.club'
+        default: 'https://kinen.club/methodology.md'
     secrets:
       OPENAI_API_KEY:
-        description: 'OpenAI API key for Aider'
+        description: 'OpenAI API key'
         required: false
       GEMINI_API_KEY:
-        description: 'Google Gemini API key for Aider'
+        description: 'Google Gemini API key'
         required: false
       ANTHROPIC_API_KEY:
-        description: 'Anthropic API key for Aider'
+        description: 'Anthropic API key'
         required: false
 
 jobs:
   session:
     runs-on: ubuntu-latest
-
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,15 +39,15 @@ jobs:
         with:
           script: |
             const { subject, body, from } = context.payload.client_payload;
-
+            
             const issue = await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: subject,
-              body: `**From:** ${from}\n\n${body}`,
+              title: subject || 'New Kinen Session',
+              body: `**From:** ${from}\n\n---\n\n${body}`,
               labels: ['kinen-session']
             });
-
+            
             console.log(`Created issue #${issue.data.number}`);
             core.setOutput('issue_number', issue.data.number);
             core.setOutput('user_email', from);
@@ -57,20 +60,20 @@ jobs:
         with:
           script: |
             const { issue_number, body, from } = context.payload.client_payload;
-
+            
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: parseInt(issue_number),
-              body: `**From:** ${from}\n\n${body}`
+              body: `**From:** ${from}\n\n---\n\n${body}`
             });
-
+            
             console.log(`Added comment to issue #${issue_number}`);
             core.setOutput('issue_number', issue_number);
             core.setOutput('user_email', from);
             return issue_number;
 
-      - name: Get issue info
+      - name: Get issue context
         id: issue
         run: |
           if [ "${{ github.event.action }}" == "email_session_start" ]; then
@@ -85,143 +88,118 @@ jobs:
         run: |
           BRANCH="session/issue-${{ steps.issue.outputs.number }}"
           git fetch origin || true
-          git checkout "$BRANCH" 2>/dev/null || git checkout -b "$BRANCH"
-          git push -u origin "$BRANCH" || true
+          
+          if git show-ref --verify --quiet refs/remotes/origin/$BRANCH; then
+            git checkout "$BRANCH"
+            git pull origin "$BRANCH"
+          else
+            git checkout -b "$BRANCH"
+          fi
 
-      - name: Determine LLM Provider
-        id: llm
+      - name: Fetch Methodology
+        id: methodology
         run: |
-          if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
-            echo "provider=openai" >> $GITHUB_OUTPUT
-            echo "model=gpt-4o" >> $GITHUB_OUTPUT
-            echo "api_key=${{ secrets.OPENAI_API_KEY }}" >> $GITHUB_OUTPUT
+          # Fetch base methodology
+          echo "Fetching methodology from ${{ inputs.methodology_url }}..."
+          curl -sL "${{ inputs.methodology_url }}" > /tmp/base-methodology.md || echo "# Kinen AI Assistant" > /tmp/base-methodology.md
+          
+          # Append custom instructions if they exist
+          if [ -f ".kinen/custom-instructions.md" ]; then
+            echo "" >> /tmp/base-methodology.md
+            echo "---" >> /tmp/base-methodology.md
+            echo "" >> /tmp/base-methodology.md
+            cat .kinen/custom-instructions.md >> /tmp/base-methodology.md
+          fi
+          
+          echo "methodology_file=/tmp/base-methodology.md" >> $GITHUB_OUTPUT
+
+      - name: Determine AI Provider
+        id: provider
+        run: |
+          if [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "provider=anthropic" >> $GITHUB_OUTPUT
+            echo "model=claude-sonnet-4-20250514" >> $GITHUB_OUTPUT
           elif [ -n "${{ secrets.GEMINI_API_KEY }}" ]; then
             echo "provider=gemini" >> $GITHUB_OUTPUT
-            echo "model=gemini/gemini-3.0-pro" >> $GITHUB_OUTPUT
-            echo "api_key=${{ secrets.GEMINI_API_KEY }}" >> $GITHUB_OUTPUT
-          elif [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
-            echo "provider=anthropic" >> $GITHUB_OUTPUT
-            echo "model=claude-3-sonnet-20240229" >> $GITHUB_OUTPUT
-            echo "api_key=${{ secrets.ANTHROPIC_API_KEY }}" >> $GITHUB_OUTPUT
+            echo "model=gemini/gemini-2.5-pro" >> $GITHUB_OUTPUT
+          elif [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
+            echo "provider=openai" >> $GITHUB_OUTPUT
+            echo "model=gpt-4o" >> $GITHUB_OUTPUT
           else
-            echo "::error::No LLM API key configured. Add OPENAI_API_KEY, GEMINI_API_KEY, or ANTHROPIC_API_KEY to repo secrets."
+            echo "provider=none" >> $GITHUB_OUTPUT
+            echo "No API key found!" >&2
             exit 1
           fi
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install Aider
-        run: |
-          pip install aider-chat
-
-      - name: Fetch Base Methodology
-        id: methodology
-        run: |
-          # Fetch base methodology from kinen.club
-          BASE_URL="${{ inputs.kinen_url }}/methodology.md"
-          echo "Fetching base methodology from $BASE_URL"
-
-          if curl -f -o /tmp/base-methodology.md "$BASE_URL" 2>/dev/null; then
-            echo "base_fetched=true" >> $GITHUB_OUTPUT
-            echo "Base methodology fetched successfully"
-          else
-            echo "base_fetched=false" >> $GITHUB_OUTPUT
-            echo "::warning::Could not fetch base methodology, using custom only"
-          fi
-
-      - name: Build Combined Methodology
-        run: |
-          # Start with base methodology
-          if [ -f /tmp/base-methodology.md ]; then
-            cat /tmp/base-methodology.md > /tmp/full-methodology.md
-          fi
-
-          # Append custom instructions if exists
-          if [ -f ".kinen/custom-instructions.md" ]; then
-            echo "" >> /tmp/full-methodology.md
-            echo "---" >> /tmp/full-methodology.md
-            echo "" >> /tmp/full-methodology.md
-            echo "# Custom Instructions" >> /tmp/full-methodology.md
-            echo "" >> /tmp/full-methodology.md
-            cat .kinen/custom-instructions.md >> /tmp/full-methodology.md
-            echo "Custom instructions appended"
-          elif [ -f ".kinen/methodology.md" ]; then
-            # Fallback to old filename
-            echo "" >> /tmp/full-methodology.md
-            echo "---" >> /tmp/full-methodology.md
-            echo "" >> /tmp/full-methodology.md
-            echo "# Custom Instructions" >> /tmp/full-methodology.md
-            echo "" >> /tmp/full-methodology.md
-            cat .kinen/methodology.md >> /tmp/full-methodology.md
-            echo "Custom instructions appended (from methodology.md)"
-          fi
-
-          echo "Full methodology built:"
-          wc -l /tmp/full-methodology.md
-
-      - name: Run Aider with Kinen Methodology
+      - name: Run Aider
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          USER_MESSAGE="${{ github.event.client_payload.body }}"
-
-          # Run Aider with:
-          # - --read: methodology file (provides context/instructions)
-          # - --message: just the user's request
+          # Install Aider
+          pip install aider-chat
+          
+          # Run Aider with methodology
           aider \
-            --model ${{ steps.llm.outputs.model }} \
-            --read /tmp/full-methodology.md \
-            --message "Follow the methodology in the read files. User request: $USER_MESSAGE" \
-            --yes \
+            --model "${{ steps.provider.outputs.model }}" \
+            --read "${{ steps.methodology.outputs.methodology_file }}" \
+            --message "${{ github.event.client_payload.body }}" \
+            --yes-always \
             --no-auto-commits
 
       - name: Commit Changes
         run: |
           git config user.name "Kinen Bot"
           git config user.email "bot@kinen.club"
-          git add .
-          git diff --staged --quiet || git commit -m "Session update: Issue #${{ steps.issue.outputs.number }}"
-          git push || true
+          
+          if [ -n "$(git status --porcelain)" ]; then
+            git add .
+            git commit -m "chore: session update for issue #${{ steps.issue.outputs.number }}"
+            git push -u origin "session/issue-${{ steps.issue.outputs.number }}"
+          else
+            echo "No changes to commit"
+          fi
 
       - name: Get changes summary
         id: summary
         run: |
           BRANCH="session/issue-${{ steps.issue.outputs.number }}"
-          COMPARE_URL="https://github.com/${{ github.repository }}/compare/main...${BRANCH}"
-
-          # Get list of changed files
-          CHANGED_FILES=$(git diff --name-only origin/main...HEAD 2>/dev/null | head -10 | tr '\n' ', ' || echo "")
-
+          COMPARE_URL="https://github.com/${{ github.repository }}/compare/main...$BRANCH"
           echo "url=$COMPARE_URL" >> $GITHUB_OUTPUT
-          echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          
+          # Get files changed
+          FILES_CHANGED=$(git diff --name-only origin/main...HEAD 2>/dev/null | head -10 | tr '\n' ', ' || echo "none")
+          echo "files=$FILES_CHANGED" >> $GITHUB_OUTPUT
 
-      - name: Post update comment
+      - name: Post AI Response
         uses: actions/github-script@v7
         with:
           script: |
-            const changedFiles = '${{ steps.summary.outputs.files }}'.split(',').filter(f => f).map(f => `- \`${f}\``).join('\n');
-
-            const body = `### Session Updated ✨
-
-            **Provider:** ${{ steps.llm.outputs.provider }}
-            **Model:** ${{ steps.llm.outputs.model }}
-
-            ${changedFiles ? `**Changed files:**\n${changedFiles}` : 'No file changes.'}
-
-            [View all changes](${{ steps.summary.outputs.url }})`;
+            const filesChanged = '${{ steps.summary.outputs.files }}' || 'No files changed';
+            const compareUrl = '${{ steps.summary.outputs.url }}';
+            
+            const comment = [
+              '## 🤖 AI Session Update',
+              '',
+              'Session processing complete.',
+              '',
+              '### Changes',
+              '- Files: ' + filesChanged,
+              '- [View full diff](' + compareUrl + ')',
+              '',
+              '---',
+              '*Reply to this issue (or via email) to continue the conversation.*'
+            ].join('\n');
 
             await github.rest.issues.createComment({
               issue_number: ${{ steps.issue.outputs.number }},
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: body
+              body: comment
             });
+            
+            console.log('Posted AI response to issue');
 
-      # Email notification is handled automatically via GitHub webhook
-      # When the bot posts a comment, GitHub sends issue_comment event to relay
-      # Relay then sends email to user with the update
+      # Note: Email notification is handled by GitHub App webhook
+      # when this comment is posted (issue_comment event)
