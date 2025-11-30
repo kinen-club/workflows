@@ -3,8 +3,8 @@ name: Kinen Agent (Reusable)
 on:
   workflow_call:
     inputs:
-      relay_url:
-        description: 'Relay endpoint URL'
+      kinen_url:
+        description: 'Kinen Club URL (for fetching methodology)'
         required: false
         type: string
         default: 'https://kinen.club'
@@ -121,7 +121,7 @@ jobs:
         id: methodology
         run: |
           # Fetch base methodology from kinen.club
-          BASE_URL="${{ inputs.relay_url }}/methodology.md"
+          BASE_URL="${{ inputs.kinen_url }}/methodology.md"
           echo "Fetching base methodology from $BASE_URL"
 
           if curl -f -o /tmp/base-methodology.md "$BASE_URL" 2>/dev/null; then
@@ -222,14 +222,6 @@ jobs:
               body: body
             });
 
-      - name: Notify user via email
-        run: |
-          curl -X POST ${{ inputs.relay_url }}/api/notify \
-            -H "Content-Type: application/json" \
-            -d '{
-              "username": "${{ github.repository_owner }}",
-              "repo": "${{ github.event.repository.name }}",
-              "issue_number": ${{ steps.issue.outputs.number }},
-              "email": "${{ steps.issue.outputs.email }}",
-              "message": "Session updated with ${{ steps.llm.outputs.provider }}. [View changes](${{ steps.summary.outputs.url }})"
-            }'
+      # Email notification is handled automatically via GitHub webhook
+      # When the bot posts a comment, GitHub sends issue_comment event to relay
+      # Relay then sends email to user with the update
