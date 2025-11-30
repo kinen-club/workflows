@@ -11,7 +11,15 @@ on:
         required: false
         type: string
         default: 'https://kinen.club/methodology.md'
+      model:
+        description: 'AI model to use (e.g., openrouter/anthropic/claude-sonnet-4-20250514)'
+        required: false
+        type: string
+        default: ''
     secrets:
+      OPENROUTER_API_KEY:
+        description: 'OpenRouter API key (recommended - access to all models)'
+        required: false
       OPENAI_API_KEY:
         description: 'OpenAI API key'
         required: false
@@ -44,11 +52,11 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: subject || 'New Kinen Session',
-              body: `**From:** ${from}\n\n---\n\n${body}`,
+              body: '**From:** ' + from + '\n\n---\n\n' + body,
               labels: ['kinen-session']
             });
             
-            console.log(`Created issue #${issue.data.number}`);
+            console.log('Created issue #' + issue.data.number);
             core.setOutput('issue_number', issue.data.number);
             core.setOutput('user_email', from);
             return issue.data.number;
@@ -65,10 +73,10 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: parseInt(issue_number),
-              body: `**From:** ${from}\n\n---\n\n${body}`
+              body: '**From:** ' + from + '\n\n---\n\n' + body
             });
             
-            console.log(`Added comment to issue #${issue_number}`);
+            console.log('Added comment to issue #' + issue_number);
             core.setOutput('issue_number', issue_number);
             core.setOutput('user_email', from);
             return issue_number;
@@ -115,30 +123,53 @@ jobs:
 
       - name: Determine AI Provider
         id: provider
+        env:
+          INPUT_MODEL: ${{ inputs.model }}
+          HAS_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY != '' }}
+          HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAS_GEMINI: ${{ secrets.GEMINI_API_KEY != '' }}
+          HAS_OPENAI: ${{ secrets.OPENAI_API_KEY != '' }}
         run: |
-          if [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
-            echo "provider=anthropic" >> $GITHUB_OUTPUT
-            echo "model=claude-sonnet-4-20250514" >> $GITHUB_OUTPUT
-          elif [ -n "${{ secrets.GEMINI_API_KEY }}" ]; then
-            echo "provider=gemini" >> $GITHUB_OUTPUT
+          # If model is explicitly specified, use it
+          if [ -n "$INPUT_MODEL" ]; then
+            echo "model=$INPUT_MODEL" >> $GITHUB_OUTPUT
+            echo "Using specified model: $INPUT_MODEL"
+            exit 0
+          fi
+          
+          # Otherwise, auto-detect based on available API keys
+          if [ "$HAS_OPENROUTER" == "true" ]; then
+            echo "model=openrouter/anthropic/claude-sonnet-4" >> $GITHUB_OUTPUT
+            echo "Using OpenRouter with Claude Sonnet 4"
+          elif [ "$HAS_ANTHROPIC" == "true" ]; then
+            echo "model=anthropic/claude-sonnet-4-20250514" >> $GITHUB_OUTPUT
+            echo "Using Anthropic directly"
+          elif [ "$HAS_GEMINI" == "true" ]; then
             echo "model=gemini/gemini-2.5-pro" >> $GITHUB_OUTPUT
-          elif [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
-            echo "provider=openai" >> $GITHUB_OUTPUT
+            echo "Using Google Gemini"
+          elif [ "$HAS_OPENAI" == "true" ]; then
             echo "model=gpt-4o" >> $GITHUB_OUTPUT
+            echo "Using OpenAI"
           else
-            echo "provider=none" >> $GITHUB_OUTPUT
-            echo "No API key found!" >&2
+            echo "❌ No API key found! Set one of:"
+            echo "   - OPENROUTER_API_KEY (recommended)"
+            echo "   - ANTHROPIC_API_KEY"
+            echo "   - GEMINI_API_KEY"
+            echo "   - OPENAI_API_KEY"
             exit 1
           fi
 
       - name: Run Aider
         env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           # Install Aider
           pip install aider-chat
+          
+          echo "🤖 Running Aider with model: ${{ steps.provider.outputs.model }}"
           
           # Run Aider with methodology
           aider \
