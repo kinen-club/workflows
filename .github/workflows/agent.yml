@@ -132,6 +132,10 @@ jobs:
           else
             git checkout -b "$BRANCH"
           fi
+          
+          # Ensure sessions directory exists
+          mkdir -p sessions
+          echo "📁 Session directory ready"
 
       - name: Fetch Methodology
         id: methodology
@@ -248,17 +252,40 @@ jobs:
           pip install aider-chat
 
           echo "🤖 Running Aider with model: ${{ steps.provider.outputs.model }}"
+          echo "📝 User message: ${{ steps.issue.outputs.message }}"
+          echo "📄 Methodology file: ${{ steps.methodology.outputs.methodology_file }}"
+          
+          # Show methodology content (first 500 chars)
+          echo "--- Methodology Preview ---"
+          head -c 500 "${{ steps.methodology.outputs.methodology_file }}" || echo "Could not read methodology"
+          echo ""
+          echo "--- End Preview ---"
 
-          # Run Aider with methodology
           # Get the user's message
           USER_MESSAGE="${{ steps.issue.outputs.message }}"
 
+          # Run Aider and capture output
+          echo "🚀 Starting Aider..."
           aider \
             --model "${{ steps.provider.outputs.model }}" \
             --read "${{ steps.methodology.outputs.methodology_file }}" \
             --message "$USER_MESSAGE" \
             --yes-always \
-            --no-auto-commits
+            --no-auto-commits \
+            2>&1 | tee /tmp/aider-output.log || {
+              echo "❌ Aider failed with exit code $?"
+              echo "--- Aider Output ---"
+              cat /tmp/aider-output.log || echo "No output log"
+              exit 1
+            }
+          
+          echo "✅ Aider completed"
+          echo "--- Aider Output ---"
+          cat /tmp/aider-output.log || echo "No output log"
+          
+          # Show what files exist
+          echo "--- Files in repo ---"
+          find . -type f -name "*.md" -o -name "*.txt" | head -20 || echo "No markdown files found"
 
       - name: Commit Changes
         run: |
@@ -283,6 +310,16 @@ jobs:
           # Get files changed
           FILES_CHANGED=$(git diff --name-only origin/main...HEAD 2>/dev/null | head -10 | tr '\n' ', ' || echo "none")
           echo "files=$FILES_CHANGED" >> $GITHUB_OUTPUT
+          
+          # Get Aider output if available
+          if [ -f /tmp/aider-output.log ]; then
+            AIDER_OUTPUT=$(cat /tmp/aider-output.log | tail -100)
+            echo "aider_output<<EOF" >> $GITHUB_OUTPUT
+            echo "$AIDER_OUTPUT" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "aider_output=" >> $GITHUB_OUTPUT
+          fi
 
       - name: Post AI Response
         uses: actions/github-script@v7
@@ -290,6 +327,7 @@ jobs:
           script: |
             const filesChanged = '${{ steps.summary.outputs.files }}' || 'No files changed';
             const compareUrl = '${{ steps.summary.outputs.url }}';
+            const aiderOutput = `${{ steps.summary.outputs.aider_output }}` || 'No output captured';
 
             const comment = [
               '## 🤖 AI Session Update',
@@ -299,6 +337,12 @@ jobs:
               '### Changes',
               '- Files: ' + filesChanged,
               '- [View full diff](' + compareUrl + ')',
+              '',
+              '### Aider Output',
+              '```',
+              aiderOutput.substring(0, 2000), // Limit to 2000 chars
+              aiderOutput.length > 2000 ? '\n... (truncated)' : '',
+              '```',
               '',
               '---',
               '*Reply to this issue (or via email) to continue the conversation.*'
