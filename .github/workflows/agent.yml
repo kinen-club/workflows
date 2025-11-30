@@ -49,12 +49,21 @@ jobs:
         id: start-session
         with:
           script: |
-            const { subject, body, from } = context.payload.client_payload;
+            const payload = context.payload.client_payload || {};
+            const subject = payload.subject || 'New Kinen Session';
+            const body = payload.body || '(No content)';
+            const from = payload.from || 'unknown';
+
+            console.log('Email Session Start:');
+            console.log('  Subject:', subject);
+            console.log('  Body length:', body.length);
+            console.log('  Body preview:', body.substring(0, 200));
+            console.log('  From:', from);
 
             const issue = await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: subject || 'New Kinen Session',
+              title: subject,
               body: '**From:** ' + from + '\n\n---\n\n' + body,
               labels: ['kinen-session']
             });
@@ -62,6 +71,7 @@ jobs:
             console.log('Created issue #' + issue.data.number);
             core.setOutput('issue_number', issue.data.number);
             core.setOutput('user_email', from);
+            core.setOutput('user_message', body);
             return issue.data.number;
 
       - name: Handle Session Continue (Email)
@@ -70,7 +80,15 @@ jobs:
         id: continue-session
         with:
           script: |
-            const { issue_number, body, from } = context.payload.client_payload;
+            const payload = context.payload.client_payload || {};
+            const issue_number = payload.issue_number;
+            const body = payload.body || '(No content)';
+            const from = payload.from || 'unknown';
+
+            console.log('Email Session Continue:');
+            console.log('  Issue:', issue_number);
+            console.log('  Body length:', body.length);
+            console.log('  Body preview:', body.substring(0, 200));
 
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -96,6 +114,7 @@ jobs:
 
             console.log('Processing comment on issue #' + issue.number);
             console.log('Comment by: ' + comment.user.login);
+            console.log('Comment body:', comment.body.substring(0, 200));
 
             core.setOutput('issue_number', issue.number);
             core.setOutput('user_email', comment.user.login + '@github');
@@ -108,17 +127,28 @@ jobs:
           if [ "${{ github.event.action }}" == "email_session_start" ]; then
             echo "number=${{ steps.start-session.outputs.issue_number }}" >> $GITHUB_OUTPUT
             echo "email=${{ steps.start-session.outputs.user_email }}" >> $GITHUB_OUTPUT
-            echo "message=${{ github.event.client_payload.body }}" >> $GITHUB_OUTPUT
+            # Use heredoc for multiline message
+            cat >> $GITHUB_OUTPUT << 'MSGEOF'
+          message<<EOF
+          ${{ steps.start-session.outputs.user_message }}
+          EOF
+          MSGEOF
           elif [ "${{ github.event_name }}" == "issue_comment" ]; then
             echo "number=${{ steps.issue-comment.outputs.issue_number }}" >> $GITHUB_OUTPUT
             echo "email=${{ steps.issue-comment.outputs.user_email }}" >> $GITHUB_OUTPUT
-            echo "message<<EOF" >> $GITHUB_OUTPUT
-            echo "${{ github.event.comment.body }}" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+            cat >> $GITHUB_OUTPUT << 'MSGEOF'
+          message<<EOF
+          ${{ github.event.comment.body }}
+          EOF
+          MSGEOF
           else
             echo "number=${{ steps.continue-session.outputs.issue_number }}" >> $GITHUB_OUTPUT
             echo "email=${{ steps.continue-session.outputs.user_email }}" >> $GITHUB_OUTPUT
-            echo "message=${{ github.event.client_payload.body }}" >> $GITHUB_OUTPUT
+            cat >> $GITHUB_OUTPUT << 'MSGEOF'
+          message<<EOF
+          ${{ steps.continue-session.outputs.user_message }}
+          EOF
+          MSGEOF
           fi
 
       - name: Create/Checkout Session Branch
@@ -144,12 +174,15 @@ jobs:
           echo "Fetching methodology from ${{ inputs.methodology_url }}..."
           curl -sL "${{ inputs.methodology_url }}" > /tmp/base-methodology.md || echo "# Kinen AI Assistant" > /tmp/base-methodology.md
 
+          echo "📄 Methodology fetched ($(wc -c < /tmp/base-methodology.md) bytes)"
+
           # Append custom instructions if they exist
           if [ -f ".kinen/custom-instructions.md" ]; then
             echo "" >> /tmp/base-methodology.md
             echo "---" >> /tmp/base-methodology.md
             echo "" >> /tmp/base-methodology.md
             cat .kinen/custom-instructions.md >> /tmp/base-methodology.md
+            echo "📝 Added custom instructions"
           fi
 
           echo "methodology_file=/tmp/base-methodology.md" >> $GITHUB_OUTPUT
@@ -245,27 +278,41 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
+          # No cache - no requirements.txt in user repos
 
       - name: Install Aider
         run: |
-          # Install Aider (pip cache handled by setup-python)
-          pip install aider-chat
+          echo "📦 Installing Aider..."
+          pip install -q aider-chat
+          echo "✅ Aider installed: $(aider --version 2>/dev/null || echo 'version check failed')"
 
+      - name: Run Aider
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
           echo "🤖 Running Aider with model: ${{ steps.provider.outputs.model }}"
-          echo "📝 User message: ${{ steps.issue.outputs.message }}"
-          echo "📄 Methodology file: ${{ steps.methodology.outputs.methodology_file }}"
-
-          # Show methodology content (first 500 chars)
-          echo "--- Methodology Preview ---"
-          head -c 500 "${{ steps.methodology.outputs.methodology_file }}" || echo "Could not read methodology"
-          echo ""
-          echo "--- End Preview ---"
 
           # Get the user's message
           USER_MESSAGE="${{ steps.issue.outputs.message }}"
+          echo "📝 User message (${#USER_MESSAGE} chars):"
+          echo "$USER_MESSAGE" | head -20
 
-          # Run Aider and capture output
+          # Show methodology preview
+          echo ""
+          echo "📄 Methodology preview:"
+          head -20 "${{ steps.methodology.outputs.methodology_file }}"
+          echo "..."
+
+          # Show current files
+          echo ""
+          echo "📁 Current files:"
+          ls -la
+          echo ""
+
+          # Run Aider
           echo "🚀 Starting Aider..."
           aider \
             --model "${{ steps.provider.outputs.model }}" \
@@ -273,20 +320,20 @@ jobs:
             --message "$USER_MESSAGE" \
             --yes-always \
             --no-auto-commits \
-            2>&1 | tee /tmp/aider-output.log || {
-              echo "❌ Aider failed with exit code $?"
-              echo "--- Aider Output ---"
-              cat /tmp/aider-output.log || echo "No output log"
-              exit 1
-            }
+            2>&1 | tee /tmp/aider-output.log
 
-          echo "✅ Aider completed"
-          echo "--- Aider Output ---"
-          cat /tmp/aider-output.log || echo "No output log"
+          AIDER_EXIT=$?
+          echo ""
+          echo "Aider exit code: $AIDER_EXIT"
 
-          # Show what files exist
-          echo "--- Files in repo ---"
-          find . -type f -name "*.md" -o -name "*.txt" | head -20 || echo "No markdown files found"
+          if [ $AIDER_EXIT -ne 0 ]; then
+            echo "❌ Aider failed"
+            echo "--- Full Aider Output ---"
+            cat /tmp/aider-output.log
+            exit 1
+          fi
+
+          echo "✅ Aider completed successfully"
 
       - name: Commit Changes
         run: |
@@ -294,11 +341,14 @@ jobs:
           git config user.email "bot@kinen.club"
 
           if [ -n "$(git status --porcelain)" ]; then
+            echo "📝 Changes detected:"
+            git status --short
             git add .
             git commit -m "chore: session update for issue #${{ steps.issue.outputs.number }}"
             git push -u origin "session/issue-${{ steps.issue.outputs.number }}"
+            echo "✅ Changes committed and pushed"
           else
-            echo "No changes to commit"
+            echo "ℹ️ No changes to commit"
           fi
 
       - name: Get changes summary
@@ -312,14 +362,14 @@ jobs:
           FILES_CHANGED=$(git diff --name-only origin/main...HEAD 2>/dev/null | head -10 | tr '\n' ', ' || echo "none")
           echo "files=$FILES_CHANGED" >> $GITHUB_OUTPUT
 
-          # Get Aider output if available
+          # Get Aider output if available (last 100 lines)
           if [ -f /tmp/aider-output.log ]; then
-            AIDER_OUTPUT=$(cat /tmp/aider-output.log | tail -100)
-            echo "aider_output<<EOF" >> $GITHUB_OUTPUT
-            echo "$AIDER_OUTPUT" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          else
-            echo "aider_output=" >> $GITHUB_OUTPUT
+            # Escape for GitHub output
+            {
+              echo "aider_output<<AIDEREOF"
+              tail -100 /tmp/aider-output.log
+              echo "AIDEREOF"
+            } >> $GITHUB_OUTPUT
           fi
 
       - name: Post AI Response
@@ -341,8 +391,8 @@ jobs:
               '',
               '### Aider Output',
               '```',
-              aiderOutput.substring(0, 2000), // Limit to 2000 chars
-              aiderOutput.length > 2000 ? '\n... (truncated)' : '',
+              aiderOutput.substring(0, 3000),
+              aiderOutput.length > 3000 ? '\n... (truncated)' : '',
               '```',
               '',
               '---',
