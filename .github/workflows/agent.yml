@@ -152,12 +152,18 @@ jobs:
 
       - name: Setup Google OAuth (if refresh token available)
         id: google-auth
-        if: ${{ secrets.GOOGLE_REFRESH_TOKEN != '' }}
         env:
           GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
         run: |
+          # Check if refresh token is provided
+          if [ -z "$GOOGLE_REFRESH_TOKEN" ]; then
+            echo "No Google refresh token provided, skipping OAuth setup"
+            echo "auth_success=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           echo "🔐 Setting up Google OAuth credentials..."
-          
+
           # Exchange refresh token via Kinen proxy (keeps client_secret secure)
           RESPONSE=$(curl -s -X POST https://kinen.club/api/token/google \
             -H "Content-Type: application/json" \
@@ -246,7 +252,7 @@ jobs:
           # Run Aider with methodology
           # Get the user's message
           USER_MESSAGE="${{ steps.issue.outputs.message }}"
-          
+
           aider \
             --model "${{ steps.provider.outputs.model }}" \
             --read "${{ steps.methodology.outputs.methodology_file }}" \
