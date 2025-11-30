@@ -1,0 +1,34 @@
+name: Kinen Onboard (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      relay_url:
+        description: 'Relay endpoint URL'
+        required: false
+        type: string
+        default: 'https://relay.kinen.space'
+    secrets:
+      RELAY_TOKEN:
+        description: 'Optional auth token for relay'
+        required: false
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get user email
+        id: get-email
+        run: |
+          EMAIL="${{ github.event.pusher.email }}"
+          echo "email=$EMAIL" >> $GITHUB_OUTPUT
+
+      - name: Notify Relay
+        run: |
+          curl -X POST ${{ inputs.relay_url }}/onboard \
+            -H "Content-Type: application/json" \
+            -d '{
+              "username": "${{ github.actor }}",
+              "repo": "${{ github.event.repository.name }}",
+              "email": "${{ steps.get-email.outputs.email }}"
+            }'
