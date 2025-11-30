@@ -69,7 +69,7 @@ jobs:
             core.setOutput('user_email', from);
             return issue.data.number;
 
-      - name: Handle Session Continue
+      - name: Handle Session Continue (Email)
         if: github.event.action == 'email_session_continue'
         uses: actions/github-script@v7
         id: continue-session
@@ -87,7 +87,25 @@ jobs:
             console.log('Added comment to issue #' + issue_number);
             core.setOutput('issue_number', issue_number);
             core.setOutput('user_email', from);
+            core.setOutput('user_message', body);
             return issue_number;
+
+      - name: Handle Issue Comment (GitHub UI)
+        if: github.event_name == 'issue_comment'
+        uses: actions/github-script@v7
+        id: issue-comment
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const comment = context.payload.comment;
+
+            console.log('Processing comment on issue #' + issue.number);
+            console.log('Comment by: ' + comment.user.login);
+
+            core.setOutput('issue_number', issue.number);
+            core.setOutput('user_email', comment.user.login + '@github');
+            core.setOutput('user_message', comment.body);
+            return issue.number;
 
       - name: Get issue context
         id: issue
@@ -95,9 +113,17 @@ jobs:
           if [ "${{ github.event.action }}" == "email_session_start" ]; then
             echo "number=${{ steps.start-session.outputs.issue_number }}" >> $GITHUB_OUTPUT
             echo "email=${{ steps.start-session.outputs.user_email }}" >> $GITHUB_OUTPUT
+            echo "message=${{ github.event.client_payload.body }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" == "issue_comment" ]; then
+            echo "number=${{ steps.issue-comment.outputs.issue_number }}" >> $GITHUB_OUTPUT
+            echo "email=${{ steps.issue-comment.outputs.user_email }}" >> $GITHUB_OUTPUT
+            echo "message<<EOF" >> $GITHUB_OUTPUT
+            echo "${{ github.event.comment.body }}" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
           else
             echo "number=${{ steps.continue-session.outputs.issue_number }}" >> $GITHUB_OUTPUT
             echo "email=${{ steps.continue-session.outputs.user_email }}" >> $GITHUB_OUTPUT
+            echo "message=${{ github.event.client_payload.body }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Create/Checkout Session Branch
@@ -224,10 +250,13 @@ jobs:
           echo "🤖 Running Aider with model: ${{ steps.provider.outputs.model }}"
 
           # Run Aider with methodology
+          # Get the user's message
+          USER_MESSAGE="${{ steps.issue.outputs.message }}"
+          
           aider \
             --model "${{ steps.provider.outputs.model }}" \
             --read "${{ steps.methodology.outputs.methodology_file }}" \
-            --message "${{ github.event.client_payload.body }}" \
+            --message "$USER_MESSAGE" \
             --yes-always \
             --no-auto-commits
 

@@ -29,56 +29,48 @@ jobs:
             const owner = context.repo.owner;
             const repo = context.repo.repo;
 
-            // Check if welcome issue already exists
+            // Check if onboarding session already exists
             const existingIssues = await github.rest.issues.listForRepo({
               owner,
               repo,
-              labels: 'kinen-welcome',
+              labels: 'onboarding',
               state: 'all'
             });
 
             if (existingIssues.data.length > 0) {
-              console.log('Welcome issue already exists, skipping creation');
+              console.log('Onboarding session already exists, skipping creation');
               return;
             }
 
             const body = [
-              '# Your Kinen Space is Ready!',
+              '# 🎯 Let\'s Discover Your First Session!',
               '',
-              'Your workspace has been set up successfully.',
+              'Welcome to Kinen! Before diving in, let\'s figure out what you\'d like to explore.',
               '',
-              '## Quick Start',
+              '**Reply to this issue** (or via email) and tell me:',
               '',
-              '1. **Install the GitHub App** (if not done): [Install Kinen](https://github.com/apps/kinen-club)',
-              '2. **Set up your API key** in Repository Settings → Secrets → Actions:',
-              '   - `OPENROUTER_API_KEY` (recommended) or',
-              '   - `OPENAI_API_KEY` or',
-              '   - `GEMINI_API_KEY` or',
-              '   - `ANTHROPIC_API_KEY`',
-              '3. **Start a session** by sending an email to: `my-project@' + owner + '.kinen.space`',
+              '- What are you working on or thinking about lately?',
+              '- What problems are you trying to solve?',
+              '- What topics or skills do you want to explore?',
+              '- Is there a project idea you\'ve been putting off?',
               '',
-              '## How It Works',
+              'Don\'t worry about being precise—just share what\'s on your mind. I\'ll help you turn it into a focused session.',
               '',
-              '1. You send an email describing what you want to build',
-              '2. AI creates an issue and asks clarifying questions',
-              '3. You reply by email',
-              '4. AI works on your code and updates the issue',
-              '5. Repeat until done!',
+              '---',
               '',
-              '## Resources',
+              '*This is your first Kinen session! I\'ll ask questions, help you clarify your thoughts, and suggest a concrete next step.*',
               '',
-              '- [Kinen Club](https://kinen.club) - Platform home',
-              '- [Kinen Methodology](https://kinen.club/methodology.md) - How AI sessions work',
+              '📧 **Reply via email:** `' + repo + '+1@' + owner + '.kinen.space`',
               '',
-              'Happy building! 🚀'
+              '💡 **Or comment directly on this issue**'
             ].join('\n');
 
             await github.rest.issues.create({
               owner,
               repo,
-              title: '👋 Welcome to your Kinen Space!',
+              title: '🚀 Your First Session: What Should We Explore?',
               body: body,
-              labels: ['kinen-welcome']
+              labels: ['kinen-session', 'onboarding']
             });
 
             console.log('Welcome issue created!');
