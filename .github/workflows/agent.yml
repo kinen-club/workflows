@@ -132,7 +132,7 @@ jobs:
           else
             git checkout -b "$BRANCH"
           fi
-          
+
           # Ensure sessions directory exists
           mkdir -p sessions
           echo "📁 Session directory ready"
@@ -241,20 +241,21 @@ jobs:
             exit 1
           fi
 
-      - name: Run Aider
-        env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Aider
         run: |
-          # Install Aider
+          # Install Aider (pip cache handled by setup-python)
           pip install aider-chat
 
           echo "🤖 Running Aider with model: ${{ steps.provider.outputs.model }}"
           echo "📝 User message: ${{ steps.issue.outputs.message }}"
           echo "📄 Methodology file: ${{ steps.methodology.outputs.methodology_file }}"
-          
+
           # Show methodology content (first 500 chars)
           echo "--- Methodology Preview ---"
           head -c 500 "${{ steps.methodology.outputs.methodology_file }}" || echo "Could not read methodology"
@@ -278,11 +279,11 @@ jobs:
               cat /tmp/aider-output.log || echo "No output log"
               exit 1
             }
-          
+
           echo "✅ Aider completed"
           echo "--- Aider Output ---"
           cat /tmp/aider-output.log || echo "No output log"
-          
+
           # Show what files exist
           echo "--- Files in repo ---"
           find . -type f -name "*.md" -o -name "*.txt" | head -20 || echo "No markdown files found"
@@ -310,7 +311,7 @@ jobs:
           # Get files changed
           FILES_CHANGED=$(git diff --name-only origin/main...HEAD 2>/dev/null | head -10 | tr '\n' ', ' || echo "none")
           echo "files=$FILES_CHANGED" >> $GITHUB_OUTPUT
-          
+
           # Get Aider output if available
           if [ -f /tmp/aider-output.log ]; then
             AIDER_OUTPUT=$(cat /tmp/aider-output.log | tail -100)
