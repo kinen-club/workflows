@@ -22,11 +22,26 @@ jobs:
           echo "Repository: ${{ github.repository }}"
           echo "Owner: ${{ github.repository_owner }}"
 
-      - name: Create welcome issue
+      - name: Create welcome issue (if not exists)
         uses: actions/github-script@v7
         with:
           script: |
             const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            
+            // Check if welcome issue already exists
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              labels: 'kinen-welcome',
+              state: 'all'
+            });
+            
+            if (existingIssues.data.length > 0) {
+              console.log('Welcome issue already exists, skipping creation');
+              return;
+            }
+            
             const body = [
               '# Your Kinen Space is Ready!',
               '',
@@ -36,10 +51,11 @@ jobs:
               '',
               '1. **Install the GitHub App** (if not done): [Install Kinen](https://github.com/apps/kinen-club)',
               '2. **Set up your API key** in Repository Settings → Secrets → Actions:',
+              '   - `OPENROUTER_API_KEY` (recommended) or',
               '   - `OPENAI_API_KEY` or',
               '   - `GEMINI_API_KEY` or',
               '   - `ANTHROPIC_API_KEY`',
-              '3. **Start a session** by sending an email to: `your-project@' + owner + '.kinen.space`',
+              '3. **Start a session** by sending an email to: `my-project@' + owner + '.kinen.space`',
               '',
               '## How It Works',
               '',
@@ -58,9 +74,11 @@ jobs:
             ].join('\n');
 
             await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner,
+              repo,
               title: '👋 Welcome to your Kinen Space!',
               body: body,
               labels: ['kinen-welcome']
             });
+            
+            console.log('Welcome issue created!');
