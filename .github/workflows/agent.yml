@@ -33,7 +33,7 @@ on:
 jobs:
   session:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -47,7 +47,7 @@ jobs:
         with:
           script: |
             const { subject, body, from } = context.payload.client_payload;
-            
+
             const issue = await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -55,7 +55,7 @@ jobs:
               body: '**From:** ' + from + '\n\n---\n\n' + body,
               labels: ['kinen-session']
             });
-            
+
             console.log('Created issue #' + issue.data.number);
             core.setOutput('issue_number', issue.data.number);
             core.setOutput('user_email', from);
@@ -68,14 +68,14 @@ jobs:
         with:
           script: |
             const { issue_number, body, from } = context.payload.client_payload;
-            
+
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: parseInt(issue_number),
               body: '**From:** ' + from + '\n\n---\n\n' + body
             });
-            
+
             console.log('Added comment to issue #' + issue_number);
             core.setOutput('issue_number', issue_number);
             core.setOutput('user_email', from);
@@ -96,7 +96,7 @@ jobs:
         run: |
           BRANCH="session/issue-${{ steps.issue.outputs.number }}"
           git fetch origin || true
-          
+
           if git show-ref --verify --quiet refs/remotes/origin/$BRANCH; then
             git checkout "$BRANCH"
             git pull origin "$BRANCH"
@@ -110,7 +110,7 @@ jobs:
           # Fetch base methodology
           echo "Fetching methodology from ${{ inputs.methodology_url }}..."
           curl -sL "${{ inputs.methodology_url }}" > /tmp/base-methodology.md || echo "# Kinen AI Assistant" > /tmp/base-methodology.md
-          
+
           # Append custom instructions if they exist
           if [ -f ".kinen/custom-instructions.md" ]; then
             echo "" >> /tmp/base-methodology.md
@@ -118,7 +118,7 @@ jobs:
             echo "" >> /tmp/base-methodology.md
             cat .kinen/custom-instructions.md >> /tmp/base-methodology.md
           fi
-          
+
           echo "methodology_file=/tmp/base-methodology.md" >> $GITHUB_OUTPUT
 
       - name: Determine AI Provider
@@ -136,11 +136,11 @@ jobs:
             echo "Using specified model: $INPUT_MODEL"
             exit 0
           fi
-          
+
           # Otherwise, auto-detect based on available API keys
           if [ "$HAS_OPENROUTER" == "true" ]; then
-            echo "model=openrouter/anthropic/claude-sonnet-4" >> $GITHUB_OUTPUT
-            echo "Using OpenRouter with Claude Sonnet 4"
+            echo "model=openrouter/anthropic/claude-sonnet-4.5" >> $GITHUB_OUTPUT
+            echo "Using OpenRouter with Claude Sonnet 4.5"
           elif [ "$HAS_ANTHROPIC" == "true" ]; then
             echo "model=anthropic/claude-sonnet-4-20250514" >> $GITHUB_OUTPUT
             echo "Using Anthropic directly"
@@ -168,9 +168,9 @@ jobs:
         run: |
           # Install Aider
           pip install aider-chat
-          
+
           echo "🤖 Running Aider with model: ${{ steps.provider.outputs.model }}"
-          
+
           # Run Aider with methodology
           aider \
             --model "${{ steps.provider.outputs.model }}" \
@@ -183,7 +183,7 @@ jobs:
         run: |
           git config user.name "Kinen Bot"
           git config user.email "bot@kinen.club"
-          
+
           if [ -n "$(git status --porcelain)" ]; then
             git add .
             git commit -m "chore: session update for issue #${{ steps.issue.outputs.number }}"
@@ -198,7 +198,7 @@ jobs:
           BRANCH="session/issue-${{ steps.issue.outputs.number }}"
           COMPARE_URL="https://github.com/${{ github.repository }}/compare/main...$BRANCH"
           echo "url=$COMPARE_URL" >> $GITHUB_OUTPUT
-          
+
           # Get files changed
           FILES_CHANGED=$(git diff --name-only origin/main...HEAD 2>/dev/null | head -10 | tr '\n' ', ' || echo "none")
           echo "files=$FILES_CHANGED" >> $GITHUB_OUTPUT
@@ -209,7 +209,7 @@ jobs:
           script: |
             const filesChanged = '${{ steps.summary.outputs.files }}' || 'No files changed';
             const compareUrl = '${{ steps.summary.outputs.url }}';
-            
+
             const comment = [
               '## 🤖 AI Session Update',
               '',
@@ -229,7 +229,7 @@ jobs:
               repo: context.repo.repo,
               body: comment
             });
-            
+
             console.log('Posted AI response to issue');
 
       # Note: Email notification is handled by GitHub App webhook
