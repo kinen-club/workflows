@@ -16,9 +16,17 @@ on:
         required: false
         type: string
         default: ''
+      google_client_id:
+        description: 'Google OAuth Client ID (for GOOGLE_REFRESH_TOKEN auth)'
+        required: false
+        type: string
+        default: ''
     secrets:
+      GOOGLE_REFRESH_TOKEN:
+        description: 'Google OAuth refresh token (FREE - 1000 requests/day)'
+        required: false
       OPENROUTER_API_KEY:
-        description: 'OpenRouter API key (recommended - access to all models)'
+        description: 'OpenRouter API key (access to all models)'
         required: false
       OPENAI_API_KEY:
         description: 'OpenAI API key'
@@ -121,10 +129,48 @@ jobs:
 
           echo "methodology_file=/tmp/base-methodology.md" >> $GITHUB_OUTPUT
 
+      - name: Setup Google OAuth (if refresh token available)
+        id: google-auth
+        if: ${{ secrets.GOOGLE_REFRESH_TOKEN != '' && inputs.google_client_id != '' }}
+        env:
+          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          GOOGLE_CLIENT_ID: ${{ inputs.google_client_id }}
+        run: |
+          echo "🔐 Setting up Google OAuth credentials..."
+
+          RESPONSE=$(curl -s -X POST https://oauth2.googleapis.com/token \
+            -d "client_id=${GOOGLE_CLIENT_ID}" \
+            -d "refresh_token=${GOOGLE_REFRESH_TOKEN}" \
+            -d "grant_type=refresh_token")
+
+          ACCESS_TOKEN=$(echo "$RESPONSE" | jq -r '.access_token')
+
+          if [ "$ACCESS_TOKEN" == "null" ] || [ -z "$ACCESS_TOKEN" ]; then
+            echo "⚠️ Failed to get access token from refresh token"
+            echo "auth_success=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Create credentials file for gemini-cli/aider
+          mkdir -p ~/.gemini
+          cat > ~/.gemini/oauth-credentials.json << EOF
+          {
+            "access_token": "$ACCESS_TOKEN",
+            "refresh_token": "$GOOGLE_REFRESH_TOKEN",
+            "token_type": "Bearer",
+            "scope": "https://www.googleapis.com/auth/cloud-platform openid email profile"
+          }
+          EOF
+
+          chmod 600 ~/.gemini/oauth-credentials.json
+          echo "✅ Google OAuth credentials configured"
+          echo "auth_success=true" >> $GITHUB_OUTPUT
+
       - name: Determine AI Provider
         id: provider
         env:
           INPUT_MODEL: ${{ inputs.model }}
+          HAS_GOOGLE_AUTH: ${{ steps.google-auth.outputs.auth_success == 'true' }}
           HAS_OPENROUTER: ${{ secrets.OPENROUTER_API_KEY != '' }}
           HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
           HAS_GEMINI: ${{ secrets.GEMINI_API_KEY != '' }}
@@ -137,8 +183,13 @@ jobs:
             exit 0
           fi
 
-          # Otherwise, auto-detect based on available API keys
-          if [ "$HAS_OPENROUTER" == "true" ]; then
+          # Otherwise, auto-detect based on available credentials
+          # Priority: Google OAuth > OpenRouter > Anthropic > Gemini API Key > OpenAI
+          if [ "$HAS_GOOGLE_AUTH" == "true" ]; then
+            echo "model=gemini/gemini-2.5-pro" >> $GITHUB_OUTPUT
+            echo "use_google_oauth=true" >> $GITHUB_OUTPUT
+            echo "✨ Using Google OAuth (FREE - 1000 requests/day)"
+          elif [ "$HAS_OPENROUTER" == "true" ]; then
             echo "model=openrouter/anthropic/claude-sonnet-4.5" >> $GITHUB_OUTPUT
             echo "Using OpenRouter with Claude Sonnet 4.5"
           elif [ "$HAS_ANTHROPIC" == "true" ]; then
@@ -146,13 +197,14 @@ jobs:
             echo "Using Anthropic directly"
           elif [ "$HAS_GEMINI" == "true" ]; then
             echo "model=gemini/gemini-2.5-pro" >> $GITHUB_OUTPUT
-            echo "Using Google Gemini"
+            echo "Using Google Gemini API key"
           elif [ "$HAS_OPENAI" == "true" ]; then
             echo "model=gpt-4o" >> $GITHUB_OUTPUT
             echo "Using OpenAI"
           else
-            echo "❌ No API key found! Set one of:"
-            echo "   - OPENROUTER_API_KEY (recommended)"
+            echo "❌ No AI credentials found! Options:"
+            echo "   - Connect Google (FREE): Click 'Continue with Google' on Kinen"
+            echo "   - OPENROUTER_API_KEY"
             echo "   - ANTHROPIC_API_KEY"
             echo "   - GEMINI_API_KEY"
             echo "   - OPENAI_API_KEY"

@@ -28,7 +28,7 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            
+
             // Check if welcome issue already exists
             const existingIssues = await github.rest.issues.listForRepo({
               owner,
@@ -36,12 +36,12 @@ jobs:
               labels: 'kinen-welcome',
               state: 'all'
             });
-            
+
             if (existingIssues.data.length > 0) {
               console.log('Welcome issue already exists, skipping creation');
               return;
             }
-            
+
             const body = [
               '# Your Kinen Space is Ready!',
               '',
@@ -80,5 +80,5 @@ jobs:
               body: body,
               labels: ['kinen-welcome']
             });
-            
+
             console.log('Welcome issue created!');
