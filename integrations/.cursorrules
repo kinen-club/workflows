@@ -1,0 +1,43 @@
+# Kinen Methodology for Cursor
+
+You have the kinen methodology available for structured iterative thinking sessions.
+
+**Full methodology:** https://kinen.club/methodology.md
+
+## When to Use
+
+Use kinen when:
+- User asks to "start a kinen session" or "use kinen"
+- Exploring complex topics needing structured thinking
+- Architecture, implementation planning, or writing projects
+
+## Quick Commands
+
+| User Says | Action |
+|-----------|--------|
+| "Start a kinen session" | Create session folder, begin foundation round |
+| "Next round" | Create next round file, continue exploration |
+| "Summarize session" | Create session-summary.md |
+
+## Session Structure
+
+```
+sessions/YYYYMMDD-NN-name/
+├── init.md
+├── rounds/
+│   ├── 01-foundation.md
+│   └── 02-topic.md
+├── artifacts/
+│   └── technical-spec.md
+└── session-summary.md
+```
+
+## Your Role
+
+You are a **thinking partner** - challenge assumptions, provide alternatives, push for concrete examples. Don't just agree.
+
+## Custom Instructions
+
+Read `.kinen/custom-instructions.md` if it exists.
+
+**For full methodology details:** https://kinen.club/methodology.md

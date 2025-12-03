@@ -1,0 +1,27 @@
+{
+  "name": "kinen",
+  "source": "./",
+  "description": "Structured iterative refinement methodology for deep collaborative thinking",
+  "version": "1.0.0",
+  "author": {
+    "name": "kinen-club",
+    "url": "https://github.com/kinen-club"
+  },
+  "homepage": "https://kinen.club",
+  "repository": "https://github.com/kinen-club/agents",
+  "license": "MIT",
+  "keywords": ["methodology", "planning", "architecture", "iterative-design", "thinking", "sessions"],
+  "category": "methodology",
+  "commands": [
+    "./commands/session.md",
+    "./commands/round.md",
+    "./commands/summarize.md"
+  ],
+  "agents": [
+    "./agents/facilitator.md"
+  ],
+  "skills": [
+    "./skills/kinen-core"
+  ]
+}
+
